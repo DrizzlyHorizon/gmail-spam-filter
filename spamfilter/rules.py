@@ -17,6 +17,15 @@ NON_LATIN_RANGES = [
 NON_LATIN_RE = re.compile("[" + "".join(f"{chr(a)}-{chr(b)}" for a, b in NON_LATIN_RANGES) + "]")
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
 MIN_LETTERS_FOR_LANGUAGE = 20
+# "Dear Joshua," / "Hi Thomas" / "Hola María": a greeting word, an optional title, then a
+# capitalized name. The greeting word is case-insensitive; the name must be capitalized.
+GREETING_RE = re.compile(
+    r"(?<![A-Za-z])(?i:dear|hi|hello|hey|greetings|good morning|good afternoon|good evening|"
+    r"hola|estimado|estimada|bonjour|cher|chère|hallo|liebe|lieber|ciao|gentile|buongiorno|"
+    r"olá|caro|cara|beste|hej|ahoj|dzień dobry|witam|szanowny|szanowna)"
+    r" +(?:(?i:mr|mrs|ms|miss|dr|sr|sra|herr|frau|mme|m)\.? +)?"
+    r"([A-ZÀ-ÖØ-Þ][A-Za-zÀ-ÖØ-öø-ÿ'-]+) *[,!:]"
+)
 
 _detector = None
 
@@ -101,6 +110,11 @@ def check_recipient(msg, w, my_addr, add):
         add(w["not_addressed_to_me"], "not addressed to you")
 
 
+def _plain_subject(msg):
+    """Lowercase subject with curly apostrophes straightened, so "You’re" matches "you're"."""
+    return msg.subject.lower().replace("’", "'").replace("‘", "'")
+
+
 def check_content(msg, w, rules, add):
     haystack = f"{msg.subject} {msg.text}".lower()
     hits = [p for p in rules["spam_phrases"] if p in haystack][:3]
@@ -110,14 +124,27 @@ def check_content(msg, w, rules, add):
         add(w["link_heavy"], "mostly links")
     if not msg.subject:
         add(w["empty_subject"], "empty subject")
-    subject = msg.subject.lower()
+    subject = _plain_subject(msg)
     if any(p in subject for p in rules["signup_phrases"]):
         add(w["signup_confirmation"], "sign-up confirmation")
 
 
+def check_greeting(msg, w, rules, my_names, add):
+    """Mail greeting someone else by name ("Dear Joshua") means your address was typed into a
+    form under a fake name: a hallmark of subscription bombing."""
+    if not my_names:
+        return
+    m = GREETING_RE.search(msg.text[:200])
+    if not m:
+        return
+    name = m.group(1).strip("'-").lower()
+    if name not in {n.lower() for n in my_names} and name not in rules["generic_greetings"]:
+        add(w["wrong_name"], f'greets "{m.group(1)}", not you')
+
+
 def is_protected(msg, rules):
     """Security/purchase notices from authenticated, non-free-mail senders: never filter these."""
-    subject = msg.subject.lower()
+    subject = _plain_subject(msg)
     return (_auth(msg.auth_results, "dmarc") == "pass"
             and msg.from_domain not in rules["freemail_domains"]
             and any(p in subject for p in rules["protected_phrases"]))
@@ -139,4 +166,5 @@ def score(msg, cfg, my_addr):
     check_sender(msg, w, rules, add)
     check_recipient(msg, w, my_addr, add)
     check_content(msg, w, rules, add)
+    check_greeting(msg, w, rules, cfg["allowlist"]["names"], add)
     return total, reasons

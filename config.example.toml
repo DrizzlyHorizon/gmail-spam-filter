@@ -48,6 +48,7 @@ suspicious_tld = 2
 spam_phrase = 2          # per matching phrase, max 3 matches
 link_heavy = 1           # several links but very little text
 empty_subject = 1
+wrong_name = 6           # "Dear Joshua," when that isn't you (needs allowlist.names set)
 signup_confirmation = 6  # "confirm your subscription" / "welcome to" from a stranger (enough for spam)
 
 [rules]
@@ -77,6 +78,21 @@ signup_phrases = [
   "thanks for subscribing", "thank you for subscribing", "thanks for signing up",
   "thank you for signing up", "account has been created", "activate your account",
   "you're subscribed", "you are subscribed", "confirm subscription", "welcome aboard",
+  "you're on the list", "you are on the list", "you're in!", "you're registered",
+  "you are registered", "registration confirmed", "subscription confirmed",
+  "thanks for joining", "thank you for joining", "thanks for your interest",
+  "thank you for your interest", "thanks for getting in touch", "thank you for getting in touch",
+  "thanks for reaching out", "thank you for reaching out", "thank you for contacting",
+  "thanks for contacting", "we received your", "we've received your", "your inquiry",
+  "your enquiry", "thanks for registering", "thank you for registering", "free guide",
+]
+# Greetings that aren't a person's name, so "Dear Customer," doesn't count as the wrong name.
+generic_greetings = [
+  "customer", "valued", "client", "member", "members", "user", "subscriber", "friend",
+  "friends", "team", "all", "everyone", "everybody", "there", "sir", "madam", "colleague",
+  "colleagues", "guest", "reader", "readers", "folks", "partner", "applicant", "candidate",
+  "sender", "supporter", "patient", "parent", "parents", "neighbor", "neighbour", "you",
+  "cliente", "kunde", "kundin", "amigo", "amiga",
 ]
 # Never filtered when the sender passes DMARC and isn't a free-mail address, and always
 # printed in the log. Subscription bombs are often used to bury exactly these emails.

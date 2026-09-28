@@ -143,3 +143,25 @@ def test_not_spam_teaches_allowlist(tmp_path):
     assert gmail.removed == ["id-Spam-Caught"]
     state.save()
     assert State(tmp_path / "state.json").rescued == {"hello@realshop.com"}
+
+
+def test_greeting_someone_else_is_spam():
+    cfg = {**CFG, "allowlist": {**CFG["allowlist"], "names": ["Devin"]}}
+    law = make(from_addr="juhee@bamyanlawgroup.com.au", subject="Criminal Law Enquiry - Joshua Harris",
+               text="Dear Joshua, We appreciate your inquiry received on Friday in relation to the above matter.")
+    total, reasons = score(law, cfg, ME)
+    assert decide(total, cfg["thresholds"]) == "spam", reasons
+    for ok in ["Dear Customer, your statement is ready.", "Hi, Thank you for your order today.",
+               "Hi there, here is your weekly update.", "Hello Team! The meeting moved to noon.",
+               "Dear Devin, thanks for writing."]:
+        _, reasons = score(make(text=ok), cfg, ME)
+        assert not any("greets" in r for r in reasons), (ok, reasons)
+
+
+def test_more_signup_wordings_are_spam():
+    for subject in ["You’re on the list!", "You're registered. (Save this email)",
+                    "Thanks for getting in touch", "Your Free Guide"]:
+        total, reasons = score(make(subject=subject), CFG, ME)
+        assert decide(total, CFG["thresholds"]) == "spam", (subject, reasons)
+    total, reasons = score(make(subject="You're invited to Sam's birthday"), CFG, ME)
+    assert decide(total, CFG["thresholds"]) == "keep", reasons
