@@ -115,8 +115,9 @@ Watch it work: `journalctl --user -u spamfilter -f`
 
 ## Undoing mistakes
 
-- **Spam folder:** open the message and click **Not spam**.
-- **Spam-Review label:** move it back to the inbox. Add the sender to `allowlist.senders` so it isn't flagged again.
+- **Spam folder:** open the message and click **Not spam**. On its next run the filter
+  notices and always allows that sender from then on (it prints `LEARNED <sender>`).
+- **Spam-Review label:** move it back to the inbox. That sender is learned the same way.
 - **Blocks:** Gmail **Settings → Filters and Blocked Addresses**.
 
 ## Optional: local AI second opinion

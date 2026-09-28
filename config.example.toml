@@ -8,6 +8,9 @@
 # Set to false in data/config.toml once you trust the results.
 dry_run = true
 
+# Only look at unread mail. Anything you've already opened is left alone.
+only_unread = true
+
 # On the very first run, scan mail from the last N days.
 backfill_days = 14
 
@@ -18,6 +21,7 @@ block = 9    # score >= this: also create a Gmail filter blocking the sender
 
 [actions]
 review_label = "Spam-Review"
+caught_label = "Spam-Caught"   # added to mail sent to spam; click "Not spam" and the sender is allowed from then on
 archive_review = true          # remove from inbox when labeling for review
 high_action = "spam"           # "spam" (reports it to Gmail) or "trash"
 create_block_filters = true
@@ -27,6 +31,8 @@ max_filters = 900              # Gmail allows ~1000 filters; leave headroom
 use_contacts = true            # your contacts + Gmail's "Other contacts" (people you've emailed)
 senders = []                   # e.g. ["friend@example.com"]
 domains = []                   # e.g. ["mybank.com"] (subdomains are included)
+names = []                     # your first name, e.g. ["Alex"]: mail greeting you by name
+                               # ("Hi Alex") or with it in the subject is always allowed
 
 [weights]
 non_english = 6          # body/subject not in English
@@ -42,6 +48,7 @@ suspicious_tld = 2
 spam_phrase = 2          # per matching phrase, max 3 matches
 link_heavy = 1           # several links but very little text
 empty_subject = 1
+signup_confirmation = 6  # "confirm your subscription" / "welcome to" from a stranger (enough for spam)
 
 [rules]
 spam_phrases = [
@@ -61,6 +68,23 @@ impersonated_brands = [
   "paypal", "amazon", "apple", "microsoft", "netflix", "google", "dhl", "fedex",
   "usps", "geek squad", "norton", "mcafee", "coinbase", "wells fargo",
   "bank of america", "chase", "costco", "walmart", "best buy",
+]
+# Subjects of sign-up confirmations. A flood of these from sites you never
+# visited means someone is signing your address up everywhere ("subscription bombing").
+signup_phrases = [
+  "confirm your subscription", "confirm your email", "verify your email",
+  "confirm your e-mail", "verify your e-mail", "please confirm", "welcome to",
+  "thanks for subscribing", "thank you for subscribing", "thanks for signing up",
+  "thank you for signing up", "account has been created", "activate your account",
+  "you're subscribed", "you are subscribed", "confirm subscription", "welcome aboard",
+]
+# Never filtered when the sender passes DMARC and isn't a free-mail address, and always
+# printed in the log. Subscription bombs are often used to bury exactly these emails.
+protected_phrases = [
+  "password", "sign-in", "sign in", "signed in", "login", "log in", "new device",
+  "security alert", "security code", "verification code", "one-time", "2-step",
+  "two-factor", "receipt", "order confirmation", "your order", "payment",
+  "purchase", "transaction", "withdrawal", "account locked", "unusual activity",
 ]
 # Blocks from these domains target the exact address, never the whole domain.
 freemail_domains = [

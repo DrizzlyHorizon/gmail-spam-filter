@@ -2,12 +2,16 @@
 import base64
 import email
 import re
+import unicodedata
 from dataclasses import dataclass, field
 from email import policy
 from email.utils import getaddresses, parseaddr
 from html.parser import HTMLParser
 
-URL_RE = re.compile(r"https?://", re.I)
+URL_RE = re.compile(r"(https?://|www\.)\S+", re.I)
+# Invisible formatting and stray combining marks that marketing mail pads previews with
+JUNK_CATEGORIES = {"Cf", "Mn", "Co"}
+MAX_WORD = 30  # longer "words" are tracking codes, not language
 MAX_TEXT = 3000
 
 
@@ -41,6 +45,13 @@ def normalize(addr):
         local = local.split("+", 1)[0].replace(".", "")
         domain = "gmail.com"
     return f"{local}@{domain}" if local else addr
+
+
+def clean_text(text):
+    """Keeps only the human-readable words: no links, invisible characters, or tracking codes."""
+    text = unicodedata.normalize("NFC", URL_RE.sub(" ", text))
+    text = "".join(ch for ch in text if unicodedata.category(ch) not in JUNK_CATEGORIES)
+    return " ".join(w for w in text.split() if len(w) <= MAX_WORD)
 
 
 class _HtmlText(HTMLParser):
@@ -105,7 +116,7 @@ def parse(gmail_msg):
     if not links:
         links = len(URL_RE.findall(plain))
 
-    text = " ".join(plain.split())[:MAX_TEXT]
+    text = clean_text(plain)[:MAX_TEXT]
     return Message(
         id=gmail_msg["id"],
         labels=set(gmail_msg.get("labelIds", [])),

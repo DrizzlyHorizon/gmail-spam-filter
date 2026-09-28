@@ -1,4 +1,4 @@
-"""Tiny JSON state file: where we left off in the mailbox, plus a cached contact list."""
+"""Tiny JSON state file: where we left off, cached contacts, and senders you rescued."""
 import json
 import time
 from pathlib import Path
@@ -13,6 +13,7 @@ class State:
         self.history_id = data.get("history_id")
         self.contacts = set(data.get("contacts", []))
         self.contacts_refreshed = data.get("contacts_refreshed", 0)
+        self.rescued = set(data.get("rescued", []))  # senders you marked "Not spam"
 
     def contacts_stale(self):
         return time.time() - self.contacts_refreshed > CONTACTS_TTL
@@ -27,5 +28,6 @@ class State:
             "history_id": self.history_id,
             "contacts": sorted(self.contacts),
             "contacts_refreshed": self.contacts_refreshed,
+            "rescued": sorted(self.rescued),
         }, indent=1))
         tmp.replace(self.path)

@@ -1,6 +1,7 @@
 """Command line entry point: `python -m spamfilter auth` / `python -m spamfilter run`."""
 import argparse
 import logging
+import re
 from collections import Counter
 from pathlib import Path
 
@@ -16,7 +17,7 @@ SKIP_LABELS = {"SENT", "DRAFT", "SPAM", "TRASH", "CHAT"}
 
 def build_allowlist(cfg, gmail, state):
     allow = cfg["allowlist"]
-    senders = {normalize(s) for s in allow["senders"]}
+    senders = {normalize(s) for s in allow["senders"]} | state.rescued
     if allow["use_contacts"]:
         if state.contacts_stale():
             state.set_contacts(gmail.contact_emails())
@@ -31,6 +32,12 @@ def is_allowed(addr, senders, domains):
         return True
     domain = domain_of(addr)
     return any(domain == d or domain.endswith("." + d) for d in domains)
+
+
+def mentions_name(msg, names):
+    """True if the subject or the opening of the email uses one of your names ("Hi Devin")."""
+    opening = f"{msg.subject} {msg.text[:300]}"
+    return any(re.search(rf"(?<![a-z]){re.escape(n)}(?![a-z])", opening, re.I) for n in names)
 
 
 def decide(score, thresholds):
@@ -48,17 +55,33 @@ class Actions:
         self.gmail, self.cfg = gmail, cfg
         self.acts = cfg["actions"]
         self.review_label = gmail.label_id(self.acts["review_label"])
+        self.caught_label = gmail.label_id(self.acts["caught_label"])
         self._filters = None
+
+    def learn_from_rescues(self, state):
+        """Senders you rescued (clicked Not spam, or moved back to the inbox) are allowed from now on."""
+        rescued = [(f'label:{self.acts["caught_label"]} -in:spam -in:trash', self.caught_label)]
+        if self.acts["archive_review"]:
+            rescued.append((f'label:{self.acts["review_label"]} in:inbox', self.review_label))
+        for query, label in rescued:
+            for msg_id in self.gmail.search_ids(query):
+                sender = normalize(self.gmail.sender(msg_id))
+                if sender and sender not in state.rescued:
+                    state.rescued.add(sender)
+                    log.info("LEARNED %s  (you marked it not spam; always allowed from now on)", sender)
+                self.gmail.modify(msg_id, remove=[label])
 
     def review(self, msg):
         remove = ["INBOX"] if self.acts["archive_review"] else []
         self.gmail.modify(msg.id, add=[self.review_label], remove=remove)
 
     def spam(self, msg):
+        # The caught label stays on the message so a later "Not spam" can be noticed.
         if self.acts["high_action"] == "trash":
+            self.gmail.modify(msg.id, add=[self.caught_label])
             self.gmail.trash(msg.id)
         else:
-            self.gmail.modify(msg.id, add=["SPAM"], remove=["INBOX"])
+            self.gmail.modify(msg.id, add=["SPAM", self.caught_label], remove=["INBOX"])
 
     def block(self, msg):
         """Blocks the whole domain, or just the address for Gmail/Outlook/etc. senders."""
@@ -79,6 +102,11 @@ class Actions:
 
 def process(msg, cfg, my_addr, actions):
     """Scores one message, logs the verdict, and applies it unless dry-running."""
+    if rules.is_protected(msg, cfg["rules"]):
+        log.info("PROTECT     %s  %r  (security/purchase notice, never filtered)",
+                 msg.from_addr, msg.subject[:60])
+        return "protected"
+
     score, reasons = rules.score(msg, cfg, my_addr)
     t, ai_cfg = cfg["thresholds"], cfg["ai"]
 
@@ -116,32 +144,38 @@ def run(args):
     state = State(args.data_dir / "state.json")
     profile = gmail.profile()
     my_addr = profile["emailAddress"]
+    actions = None if dry_run else Actions(gmail, cfg)
+    if actions:
+        actions.learn_from_rescues(state)
     senders, domains = build_allowlist(cfg, gmail, state)
+    names = cfg["allowlist"]["names"]
 
+    only_unread = cfg["only_unread"]
+    base_query = "-in:sent -in:chats" + (" is:unread" if only_unread else "")
     if args.backfill or state.history_id is None:
         days = args.backfill or cfg["backfill_days"]
-        log.info("Scanning mail from the last %d days", days)
-        ids = gmail.search_ids(f"newer_than:{days}d -in:sent -in:chats")
+        log.info("Scanning %smail from the last %d days", "unread " if only_unread else "", days)
+        ids = gmail.search_ids(f"newer_than:{days}d {base_query}")
         latest = profile["historyId"]
     else:
         result = gmail.new_message_ids(state.history_id)
         if result is None:
             log.warning("Saved position too old; scanning the last day instead")
-            ids, latest = gmail.search_ids("newer_than:1d -in:sent -in:chats"), profile["historyId"]
+            ids, latest = gmail.search_ids(f"newer_than:1d {base_query}"), profile["historyId"]
         else:
             ids, latest = result
 
-    actions = None if dry_run else Actions(gmail, cfg)
     counts = Counter()
     for msg_id in ids:
         raw = gmail.get_raw(msg_id)
-        if raw is None or SKIP_LABELS & set(raw.get("labelIds", [])):
+        labels = set(raw.get("labelIds", [])) if raw else set()
+        if raw is None or SKIP_LABELS & labels or (only_unread and "UNREAD" not in labels):
             continue
         try:
             msg = parse(raw)
             if actions and actions.review_label in msg.labels:
                 continue
-            if is_allowed(msg.from_addr, senders, domains):
+            if is_allowed(msg.from_addr, senders, domains) or mentions_name(msg, names):
                 counts["allowed"] += 1
                 continue
             counts[process(msg, cfg, my_addr, actions)] += 1
@@ -174,7 +208,7 @@ def main():
     args = parser.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO,
                         format="%(asctime)s %(levelname)s %(message)s")
-    logging.getLogger("googleapiclient").setLevel(logging.WARNING)
+    logging.getLogger("googleapiclient").setLevel(logging.ERROR)
 
     if args.command == "auth":
         authorize(args.data_dir, args.port)

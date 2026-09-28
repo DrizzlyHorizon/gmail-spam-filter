@@ -3,26 +3,44 @@ import re
 
 from .message import domain_of, normalize
 
-# Cyrillic, Hebrew, Arabic, Thai, Japanese kana, CJK, Hangul
-NON_LATIN_RE = re.compile(
-    "[Ѐ-ӿ֐-׿؀-ۿ฀-๿"
-    "぀-ヿ㐀-鿿가-힯]"
-)
+NON_LATIN_RANGES = [
+    (0x0370, 0x03FF),  # Greek
+    (0x0400, 0x04FF),  # Cyrillic
+    (0x0590, 0x05FF),  # Hebrew
+    (0x0600, 0x06FF),  # Arabic
+    (0x0900, 0x097F),  # Devanagari
+    (0x0E00, 0x0E7F),  # Thai
+    (0x3040, 0x30FF),  # Japanese kana
+    (0x3400, 0x9FFF),  # CJK
+    (0xAC00, 0xD7AF),  # Hangul
+]
+NON_LATIN_RE = re.compile("[" + "".join(f"{chr(a)}-{chr(b)}" for a, b in NON_LATIN_RANGES) + "]")
 EMAIL_RE = re.compile(r"[\w.+-]+@[\w-]+(\.[\w-]+)+")
 MIN_LETTERS_FOR_LANGUAGE = 20
 
 _detector = None
 
+# Languages the detector chooses between. Keeping it to common ones stops short
+# or odd English text from being matched to rare languages like Yoruba.
+DETECT_LANGUAGES = [
+    "ENGLISH", "SPANISH", "FRENCH", "GERMAN", "ITALIAN", "PORTUGUESE", "DUTCH",
+    "POLISH", "CZECH", "SLOVAK", "SLOVENE", "CROATIAN", "HUNGARIAN", "ROMANIAN",
+    "SWEDISH", "DANISH", "BOKMAL", "FINNISH", "TURKISH", "INDONESIAN", "VIETNAMESE",
+    "LITHUANIAN", "LATVIAN", "ESTONIAN", "RUSSIAN", "UKRAINIAN", "GREEK", "ARABIC",
+    "CHINESE", "JAPANESE", "KOREAN",
+]
 
-def _english_confidence(text):
-    """Returns (confidence that text is English, detected language name)."""
+
+def _detect_language(text):
+    """Returns (detected language name, confidence that the text is English)."""
     global _detector
     from lingua import Language, LanguageDetectorBuilder
     if _detector is None:
-        _detector = LanguageDetectorBuilder.from_all_languages().build()
-    confidence = _detector.compute_language_confidence(text, Language.ENGLISH)
+        langs = [getattr(Language, name) for name in DETECT_LANGUAGES]
+        _detector = LanguageDetectorBuilder.from_languages(*langs).build()
     detected = _detector.detect_language_of(text)
-    return confidence, detected.name.title() if detected else "unknown"
+    confidence = _detector.compute_language_confidence(text, Language.ENGLISH)
+    return (detected.name.title() if detected else "Unknown"), confidence
 
 
 def _auth(results, mechanism):
@@ -40,11 +58,11 @@ def check_language(msg, w, add):
     letters = sum(ch.isalpha() for ch in text)
     if letters < MIN_LETTERS_FOR_LANGUAGE:
         return
-    if len(NON_LATIN_RE.findall(text)) / letters > 0.2:
+    if len(NON_LATIN_RE.findall(text)) / letters > 0.3:
         add(w["non_latin_script"], "non-Latin script")
         return
-    confidence, language = _english_confidence(text)
-    if confidence < 0.5:
+    language, english_confidence = _detect_language(text)
+    if language != "English" and english_confidence < 0.5:
         add(w["non_english"], f"language={language}")
 
 
@@ -92,6 +110,17 @@ def check_content(msg, w, rules, add):
         add(w["link_heavy"], "mostly links")
     if not msg.subject:
         add(w["empty_subject"], "empty subject")
+    subject = msg.subject.lower()
+    if any(p in subject for p in rules["signup_phrases"]):
+        add(w["signup_confirmation"], "sign-up confirmation")
+
+
+def is_protected(msg, rules):
+    """Security/purchase notices from authenticated, non-free-mail senders: never filter these."""
+    subject = msg.subject.lower()
+    return (_auth(msg.auth_results, "dmarc") == "pass"
+            and msg.from_domain not in rules["freemail_domains"]
+            and any(p in subject for p in rules["protected_phrases"]))
 
 
 def score(msg, cfg, my_addr):

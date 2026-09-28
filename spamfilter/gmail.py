@@ -1,5 +1,7 @@
 """Thin wrapper around the Gmail and People APIs."""
 import logging
+import time
+from email.utils import parseaddr
 from pathlib import Path
 
 from google.auth.exceptions import RefreshError
@@ -18,6 +20,21 @@ SCOPES = [
     "https://www.googleapis.com/auth/contacts.other.readonly",  # allowlist: people you've emailed
 ]
 RETRIES = 3
+RATE_LIMIT_WAITS = 8
+
+
+def _run(request):
+    """Executes an API request, waiting out per-minute quota errors instead of failing."""
+    for attempt in range(RATE_LIMIT_WAITS):
+        try:
+            return request.execute(num_retries=RETRIES)
+        except HttpError as e:
+            if e.resp.status not in (403, 429) or b"rateLimitExceeded" not in e.content:
+                raise
+            wait = 15 * (attempt + 1)
+            log.warning("Gmail rate limit hit; waiting %ds", wait)
+            time.sleep(wait)
+    return request.execute(num_retries=RETRIES)
 
 
 def authorize(data_dir, port):
@@ -56,13 +73,13 @@ class Gmail:
         self.users = self.svc.users()
 
     def profile(self):
-        return self.users.getProfile(userId="me").execute(num_retries=RETRIES)
+        return _run(self.users.getProfile(userId="me"))
 
     def search_ids(self, query):
         ids = []
         req = self.users.messages().list(userId="me", q=query, maxResults=500)
         while req is not None:
-            resp = req.execute(num_retries=RETRIES)
+            resp = _run(req)
             ids += [m["id"] for m in resp.get("messages", [])]
             req = self.users.messages().list_next(req, resp)
         return ids
@@ -74,7 +91,7 @@ class Gmail:
                                         historyTypes=["messageAdded"], maxResults=500)
         try:
             while req is not None:
-                resp = req.execute(num_retries=RETRIES)
+                resp = _run(req)
                 for h in resp.get("history", []):
                     ids += [a["message"]["id"] for a in h.get("messagesAdded", [])]
                 latest = resp.get("historyId", latest)
@@ -87,35 +104,42 @@ class Gmail:
 
     def get_raw(self, msg_id):
         try:
-            return self.users.messages().get(userId="me", id=msg_id, format="raw").execute(num_retries=RETRIES)
+            return _run(self.users.messages().get(userId="me", id=msg_id, format="raw"))
         except HttpError as e:
             if e.resp.status == 404:  # deleted since it arrived
                 return None
             raise
 
+    def sender(self, msg_id):
+        """Returns just the From address of a message, without downloading the body."""
+        msg = _run(self.users.messages().get(userId="me", id=msg_id, format="metadata",
+                                             metadataHeaders=["From"]))
+        headers = msg.get("payload", {}).get("headers", [])
+        return next((parseaddr(h["value"])[1] for h in headers if h["name"].lower() == "from"), "")
+
     def label_id(self, name):
         """Returns the id of a user label, creating it if needed."""
-        labels = self.users.labels().list(userId="me").execute(num_retries=RETRIES).get("labels", [])
+        labels = _run(self.users.labels().list(userId="me")).get("labels", [])
         for label in labels:
             if label["name"] == name:
                 return label["id"]
-        return self.users.labels().create(userId="me", body={"name": name}).execute(num_retries=RETRIES)["id"]
+        return _run(self.users.labels().create(userId="me", body={"name": name}))["id"]
 
     def modify(self, msg_id, add=(), remove=()):
         body = {"addLabelIds": list(add), "removeLabelIds": list(remove)}
-        self.users.messages().modify(userId="me", id=msg_id, body=body).execute(num_retries=RETRIES)
+        _run(self.users.messages().modify(userId="me", id=msg_id, body=body))
 
     def trash(self, msg_id):
-        self.users.messages().trash(userId="me", id=msg_id).execute(num_retries=RETRIES)
+        _run(self.users.messages().trash(userId="me", id=msg_id))
 
     def filter_senders(self):
-        resp = self.users.settings().filters().list(userId="me").execute(num_retries=RETRIES)
+        resp = _run(self.users.settings().filters().list(userId="me"))
         return [f.get("criteria", {}).get("from", "").lower() for f in resp.get("filter", [])]
 
     def block(self, sender):
         """Same as Gmail's own "Block": future mail from sender goes straight to trash."""
         body = {"criteria": {"from": sender}, "action": {"addLabelIds": ["TRASH"], "removeLabelIds": ["INBOX"]}}
-        self.users.settings().filters().create(userId="me", body=body).execute(num_retries=RETRIES)
+        _run(self.users.settings().filters().create(userId="me", body=body))
 
     def contact_emails(self):
         emails = set()
@@ -128,7 +152,7 @@ class Gmail:
         for resource, key, params in sources:
             req = resource.list(**params)
             while req is not None:
-                resp = req.execute(num_retries=RETRIES)
+                resp = _run(req)
                 for person in resp.get(key, []):
                     emails.update(e["value"].lower() for e in person.get("emailAddresses", []) if e.get("value"))
                 req = resource.list_next(req, resp)

@@ -80,3 +80,66 @@ def test_parse_raw_message():
     assert msg.text == "Hi there"
     assert msg.links == 1
     assert "dmarc=pass" in msg.auth_results
+
+
+def test_tracking_links_dont_confuse_language():
+    from spamfilter.message import clean_text
+    junk = "[https://cdn.us1.exponea.com/e/.eJwTUnidrLXzmvj_T-c7unOZV2s5iF_m75C943jIa95BZgfOG0l]"
+    text = clean_text(f"{junk} Test your Endgame memory and see how many scenes you remember. {junk} "
+                      "Shop the new collectibles before they sell out this weekend.")
+    total, reasons = score(make(text=text), CFG, ME)
+    assert not any("language" in r for r in reasons), reasons
+
+
+def test_signup_confirmation_is_spam():
+    total, reasons = score(make(subject="Important: confirm your subscription"), CFG, ME)
+    assert decide(total, CFG["thresholds"]) == "spam", reasons
+    total, reasons = score(make(subject="Welcome to Silent Success Society"), CFG, ME)
+    assert decide(total, CFG["thresholds"]) == "spam", reasons
+
+
+def test_security_notices_are_protected():
+    from spamfilter.rules import is_protected
+    real = make(from_addr="customer_support@email.ticketmaster.com",
+                subject="Your Ticketmaster password has been updated")
+    assert is_protected(real, CFG["rules"])
+    spoof = make(from_addr="alerts@secure-login.xyz", subject="Your password has been updated",
+                 auth_results="mx.google.com; dmarc=fail")
+    assert not is_protected(spoof, CFG["rules"])
+
+
+def test_first_name_allows_mail():
+    from spamfilter.__main__ import mentions_name
+    assert mentions_name(make(text="Hi Devin, your order shipped today."), ["Devin"])
+    assert mentions_name(make(subject="devin, this is what you missed"), ["Devin"])
+    assert not mentions_name(make(text="Hi Kevin, welcome aboard."), ["Devin"])
+    assert not mentions_name(make(text="Devinity newsletter"), ["Devin"])
+
+
+class FakeGmail:
+    """Stands in for Gmail: one caught message was rescued with "Not spam"."""
+    def __init__(self):
+        self.removed = []
+
+    def label_id(self, name):
+        return f"id-{name}"
+
+    def search_ids(self, query):
+        return ["m1"] if "Spam-Caught" in query else []
+
+    def sender(self, msg_id):
+        return "Hello@RealShop.com"
+
+    def modify(self, msg_id, add=(), remove=()):
+        self.removed += list(remove)
+
+
+def test_not_spam_teaches_allowlist(tmp_path):
+    from spamfilter.__main__ import Actions
+    from spamfilter.state import State
+    gmail, state = FakeGmail(), State(tmp_path / "state.json")
+    Actions(gmail, CFG).learn_from_rescues(state)
+    assert state.rescued == {"hello@realshop.com"}
+    assert gmail.removed == ["id-Spam-Caught"]
+    state.save()
+    assert State(tmp_path / "state.json").rescued == {"hello@realshop.com"}
