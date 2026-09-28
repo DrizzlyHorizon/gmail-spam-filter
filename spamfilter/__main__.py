@@ -100,14 +100,14 @@ class Actions:
         return target
 
 
-def process(msg, cfg, my_addr, actions):
+def process(msg, cfg, my_addr, actions, known=frozenset()):
     """Scores one message, logs the verdict, and applies it unless dry-running."""
     if rules.is_protected(msg, cfg["rules"]):
         log.info("PROTECT     %s  %r  (security/purchase notice, never filtered)",
                  msg.from_addr, msg.subject[:60])
         return "protected"
 
-    score, reasons = rules.score(msg, cfg, my_addr)
+    score, reasons = rules.score(msg, cfg, my_addr, known)
     t, ai_cfg = cfg["thresholds"], cfg["ai"]
 
     if ai_cfg["enabled"] and ai_cfg["min_score"] <= score < t["spam"]:
@@ -178,7 +178,7 @@ def run(args):
             if is_allowed(msg.from_addr, senders, domains) or mentions_name(msg, names):
                 counts["allowed"] += 1
                 continue
-            counts[process(msg, cfg, my_addr, actions)] += 1
+            counts[process(msg, cfg, my_addr, actions, senders)] += 1
         except Exception:
             log.exception("Failed on message %s", msg_id)
             counts["errors"] += 1

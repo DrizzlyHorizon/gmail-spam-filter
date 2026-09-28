@@ -165,3 +165,18 @@ def test_more_signup_wordings_are_spam():
         assert decide(total, CFG["thresholds"]) == "spam", (subject, reasons)
     total, reasons = score(make(subject="You're invited to Sam's birthday"), CFG, ME)
     assert decide(total, CFG["thresholds"]) == "keep", reasons
+
+
+def test_sent_to_strangers_is_spam():
+    star = make(from_addr="monishan@starsoftware.co",
+                recipients=[ME, "robin@a.com", "abizar@b.com", "danika@c.com"])
+    total, reasons = score(star, CFG, ME)
+    assert decide(total, CFG["thresholds"]) == "spam", reasons
+    # the sender's coworkers, your contacts, and mailing lists don't count
+    law = make(from_addr="juhee@bamyanlawgroup.com.au",
+               recipients=[ME, "aziz@bamyanlawgroup.com.au", "admin@bamyanlawgroup.com.au"])
+    friends = make(recipients=[ME, "pal1@x.com", "pal2@y.com"])
+    club = make(recipients=[ME, "a@x.com", "b@y.com"], mailing_list=True)
+    assert not any("strangers" in r for r in score(law, CFG, ME)[1])
+    assert not any("strangers" in r for r in score(friends, CFG, ME, {"pal1@x.com", "pal2@y.com"})[1])
+    assert not any("strangers" in r for r in score(club, CFG, ME)[1])

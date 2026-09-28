@@ -27,6 +27,7 @@ class Message:
     auth_results: str = ""
     text: str = ""
     links: int = 0
+    mailing_list: bool = False  # has a List-Id header (school, club, Google Groups)
 
     @property
     def from_domain(self):
@@ -128,4 +129,5 @@ def parse(gmail_msg):
         auth_results=auth.lower(),
         text=text,
         links=links,
+        mailing_list=bool(_header(msg, "List-Id")),
     )

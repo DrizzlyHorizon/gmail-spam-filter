@@ -44,6 +44,7 @@ display_name_spoof = 3   # display name contains a different email address
 brand_impersonation = 3  # e.g. "PayPal" from a non-PayPal domain
 reply_to_mismatch = 1    # Reply-To goes to a different domain than From
 not_addressed_to_me = 1  # you're BCC'd / "undisclosed recipients"
+shared_with_strangers = 6  # also sent to 2+ people who aren't your contacts or the sender's coworkers
 suspicious_tld = 2
 spam_phrase = 2          # per matching phrase, max 3 matches
 link_heavy = 1           # several links but very little text

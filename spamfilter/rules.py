@@ -105,9 +105,17 @@ def check_sender(msg, w, rules, add):
         add(w["suspicious_tld"], f".{domain.rpartition('.')[2]} domain")
 
 
-def check_recipient(msg, w, my_addr, add):
-    if normalize(my_addr) not in {normalize(a) for a in msg.recipients}:
+def check_recipient(msg, w, my_addr, known, add):
+    recipients = {normalize(a) for a in msg.recipients}
+    if normalize(my_addr) not in recipients:
         add(w["not_addressed_to_me"], "not addressed to you")
+        return
+    # Sent to you plus people you don't know (and who don't work for the sender):
+    # a contact form or list someone else filled in with your address.
+    strangers = [a for a in recipients - {normalize(my_addr)}
+                 if a not in known and not _same_org(domain_of(a), msg.from_domain)]
+    if len(strangers) >= 2 and not msg.mailing_list:
+        add(w["shared_with_strangers"], f"also sent to {len(strangers)} strangers")
 
 
 def _plain_subject(msg):
@@ -150,8 +158,8 @@ def is_protected(msg, rules):
             and any(p in subject for p in rules["protected_phrases"]))
 
 
-def score(msg, cfg, my_addr):
-    """Returns (total score, list of human-readable reasons)."""
+def score(msg, cfg, my_addr, known=frozenset()):
+    """Returns (total score, list of human-readable reasons). known: allowlisted addresses."""
     total, reasons = 0, []
 
     def add(weight, reason):
@@ -164,7 +172,7 @@ def score(msg, cfg, my_addr):
     check_language(msg, w, add)
     check_auth(msg, w, add)
     check_sender(msg, w, rules, add)
-    check_recipient(msg, w, my_addr, add)
+    check_recipient(msg, w, my_addr, known, add)
     check_content(msg, w, rules, add)
     check_greeting(msg, w, rules, cfg["allowlist"]["names"], add)
     return total, reasons
