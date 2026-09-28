@@ -111,7 +111,8 @@ systemctl --user enable --now spamfilter.timer
 sudo loginctl enable-linger $USER      # keep running when you're logged out
 ```
 
-Watch it work: `journalctl --user -u spamfilter -f`
+Watch it work: `journalctl _SYSTEMD_USER_UNIT=spamfilter.service -f`
+(Raspberry Pi OS keeps user-service logs in the system journal, so `journalctl --user` shows nothing.)
 
 ## Undoing mistakes
 
