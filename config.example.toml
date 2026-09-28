@@ -1,0 +1,82 @@
+# Gmail spam filter settings.
+#
+# This file holds the defaults. To change anything, copy the settings you want
+# into data/config.toml (which is not committed) and edit them there. Anything
+# you leave out of data/config.toml falls back to the value here.
+
+# Preview only: print what would happen but don't touch any mail.
+# Set to false in data/config.toml once you trust the results.
+dry_run = true
+
+# On the very first run, scan mail from the last N days.
+backfill_days = 14
+
+[thresholds]
+review = 3   # score >= this: label "Spam-Review" and archive
+spam = 6     # score >= this: report as spam (or trash, see actions.high_action)
+block = 9    # score >= this: also create a Gmail filter blocking the sender
+
+[actions]
+review_label = "Spam-Review"
+archive_review = true          # remove from inbox when labeling for review
+high_action = "spam"           # "spam" (reports it to Gmail) or "trash"
+create_block_filters = true
+max_filters = 900              # Gmail allows ~1000 filters; leave headroom
+
+[allowlist]
+use_contacts = true            # your contacts + Gmail's "Other contacts" (people you've emailed)
+senders = []                   # e.g. ["friend@example.com"]
+domains = []                   # e.g. ["mybank.com"] (subdomains are included)
+
+[weights]
+non_english = 6          # body/subject not in English
+non_latin_script = 6     # Cyrillic, Chinese, Arabic, etc.
+dmarc_fail = 3
+spf_fail = 2
+dkim_missing = 1
+display_name_spoof = 3   # display name contains a different email address
+brand_impersonation = 3  # e.g. "PayPal" from a non-PayPal domain
+reply_to_mismatch = 1    # Reply-To goes to a different domain than From
+not_addressed_to_me = 1  # you're BCC'd / "undisclosed recipients"
+suspicious_tld = 2
+spam_phrase = 2          # per matching phrase, max 3 matches
+link_heavy = 1           # several links but very little text
+empty_subject = 1
+
+[rules]
+spam_phrases = [
+  "you have won", "claim your prize", "lottery", "inheritance", "beneficiary",
+  "wire transfer", "bitcoin", "crypto wallet", "investment opportunity",
+  "verify your account", "account suspended", "unusual sign-in activity",
+  "your password expires", "final notice", "act now", "limited time offer",
+  "dear friend", "dear beneficiary", "business proposal", "gift card",
+  "geek squad", "norton renewal", "mcafee renewal", "order has been shipped to",
+  "hot singles", "meet women", "enlarge", "weight loss",
+]
+suspicious_tlds = [
+  "xyz", "top", "click", "shop", "icu", "buzz", "rest", "cyou", "sbs", "cfd",
+  "monster", "cam", "quest", "bond", "zip", "mov", "lat", "ru", "cn",
+]
+impersonated_brands = [
+  "paypal", "amazon", "apple", "microsoft", "netflix", "google", "dhl", "fedex",
+  "usps", "geek squad", "norton", "mcafee", "coinbase", "wells fargo",
+  "bank of america", "chase", "costco", "walmart", "best buy",
+]
+# Blocks from these domains target the exact address, never the whole domain.
+freemail_domains = [
+  "gmail.com", "googlemail.com", "outlook.com", "hotmail.com", "live.com",
+  "yahoo.com", "aol.com", "icloud.com", "me.com", "proton.me", "protonmail.com",
+  "gmx.com", "gmx.net", "mail.com", "yandex.com", "yandex.ru", "mail.ru",
+  "zoho.com", "qq.com", "163.com",
+]
+
+# Optional local AI (Ollama on the Pi). It only gives a second opinion on
+# borderline mail: messages scoring between ai.min_score and thresholds.spam.
+[ai]
+enabled = false
+url = "http://localhost:11434"
+model = "qwen2.5:3b"
+min_score = 1
+weight = 3          # added if the model says spam, subtracted if it says not spam
+min_confidence = 0.7
+timeout = 120

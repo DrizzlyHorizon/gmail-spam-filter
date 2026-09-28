@@ -1,0 +1,8 @@
+# Secrets and local state -- never commit these
+data/*
+!data/.gitkeep
+
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

@@ -1,0 +1,8 @@
+[Unit]
+Description=Gmail spam filter
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h/gmail-spam-filter
+ExecStart=%h/gmail-spam-filter/.venv/bin/python -m spamfilter run
+Nice=10
